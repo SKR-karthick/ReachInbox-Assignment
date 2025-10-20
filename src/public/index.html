@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReachInbox - Email Onebox</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+        }
+        .sidebar {
+            background-color: #fff;
+            border-right: 1px solid #dee2e6;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            padding-top: 1rem;
+        }
+        .email-item {
+            padding: 0.75rem;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .email-item:hover {
+            background-color: #f5f5f5;
+        }
+        .email-item.active {
+            background-color: #e2f0ff;
+            border-left: 3px solid #0d6efd;
+        }
+        .category-badge {
+            font-size: 0.7rem;
+            padding: 0.25rem 0.5rem;
+        }
+        .email-preview {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #6c757d;
+            font-size: 0.85rem;
+        }
+        .main-content {
+            background-color: #fff;
+            border-radius: 0.25rem;
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            padding: 1.5rem;
+            min-height: calc(100vh - 2rem);
+        }
+        .email-subject {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        .email-header {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .email-meta {
+            color: #6c757d;
+            font-size: 0.875rem;
+        }
+        .email-body {
+            line-height: 1.6;
+        }
+        .search-box {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+        .search-icon {
+            position: absolute;
+            left: 0.75rem;
+            top: 0.5rem;
+            color: #6c757d;
+        }
+        .search-input {
+            padding-left: 2.5rem;
+            border-radius: 1.5rem;
+        }
+        .reply-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 0.25rem;
+            padding: 1rem;
+            margin-top: 1.5rem;
+        }
+        .category-filter {
+            margin-bottom: 1rem;
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(255, 255, 255, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .loading-spinner {
+            width: 3rem;
+            height: 3rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- Sidebar -->
+            <div class="col-md-3 sidebar d-flex flex-column">
+                <div class="d-flex align-items-center mb-4">
+                    <h3 class="mb-0">ReachInbox</h3>
+                </div>
+                
+                <!-- Search -->
+                <div class="search-box">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="search-input" class="form-control search-input" placeholder="Search emails...">
+                </div>
+                
+                <!-- Account & Folder Filter -->
+                <div class="mb-3">
+                    <select id="account-filter" class="form-select mb-2">
+                        <option value="">All Accounts</option>
+                        <!-- Will be populated dynamically -->
+                    </select>
+                    <select id="folder-filter" class="form-select">
+                        <option value="">All Folders</option>
+                        <!-- Will be populated dynamically -->
+                    </select>
+                </div>
+                
+                <!-- Category Filter -->
+                <div class="category-filter">
+                    <div class="btn-group btn-group-sm w-100" role="group">
+                        <input type="radio" class="btn-check" name="category" id="all-category" value="" checked>
+                        <label class="btn btn-outline-secondary" for="all-category">All</label>
+                        
+                        <input type="radio" class="btn-check" name="category" id="interested-category" value="Interested">
+                        <label class="btn btn-outline-success" for="interested-category">Interested</label>
+                        
+                        <input type="radio" class="btn-check" name="category" id="meeting-category" value="Meeting Booked">
+                        <label class="btn btn-outline-primary" for="meeting-category">Meeting</label>
+                    </div>
+                </div>
+                
+                <!-- Email List -->
+                <div id="email-list" class="flex-grow-1 overflow-auto">
+                    <!-- Will be populated dynamically -->
+                </div>
+            </div>
+            
+            <!-- Main Content -->
+            <div class="col-md-9 p-3">
+                <div class="main-content" id="email-detail">
+                    <!-- Will show selected email or welcome message -->
+                    <div class="text-center py-5" id="welcome-message">
+                        <h3>Welcome to ReachInbox</h3>
+                        <p class="text-muted">Select an email to view its contents</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Indicator -->
+    <div class="loading" id="loading-indicator" style="display: none;">
+        <div class="spinner-border loading-spinner text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // API endpoints
+        const API_EMAILS = '/api/emails';
+        const API_ACCOUNTS = '/api/accounts';
+        
+        // State
+        let currentEmailId = null;
+        let emails = [];
+        let accounts = [];
+        let folders = [];
+        
+        // DOM Elements
+        const emailListEl = document.getElementById('email-list');
+        const emailDetailEl = document.getElementById('email-detail');
+        const welcomeMessageEl = document.getElementById('welcome-message');
+        const searchInputEl = document.getElementById('search-input');
+        const accountFilterEl = document.getElementById('account-filter');
+        const folderFilterEl = document.getElementById('folder-filter');
+        const categoryRadios = document.querySelectorAll('input[name="category"]');
+        const loadingIndicatorEl = document.getElementById('loading-indicator');
+        
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadAccounts();
+            await loadEmails();
+            
+            // Set up event listeners
+            searchInputEl.addEventListener('input', debounce(loadEmails, 300));
+            accountFilterEl.addEventListener('change', loadEmails);
+            folderFilterEl.addEventListener('change', loadEmails);
+            categoryRadios.forEach(radio => {
+                radio.addEventListener('change', loadEmails);
+            });
+        });
+        
+        // Load accounts and folders
+        async function loadAccounts() {
+            showLoading();
+            try {
+                const response = await fetch(API_ACCOUNTS);
+                const data = await response.json();
+                
+                // Extract unique accounts and folders
+                const uniqueAccounts = [...new Set(data.map(item => item.accountId))];
+                const uniqueFolders = [...new Set(data.map(item => item.folder))];
+                
+                accounts = uniqueAccounts;
+                folders = uniqueFolders;
+                
+                // Populate account dropdown
+                accountFilterEl.innerHTML = '<option value="">All Accounts</option>';
+                accounts.forEach(account => {
+                    const option = document.createElement('option');
+                    option.value = account;
+                    option.textContent = account;
+                    accountFilterEl.appendChild(option);
+                });
+                
+                // Populate folder dropdown
+                folderFilterEl.innerHTML = '<option value="">All Folders</option>';
+                folders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder;
+                    option.textContent = folder;
+                    folderFilterEl.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading accounts:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Load emails based on filters
+        async function loadEmails() {
+            showLoading();
+            try {
+                // Build query parameters
+                const params = new URLSearchParams();
+                
+                const searchQuery = searchInputEl.value.trim();
+                if (searchQuery) {
+                    params.append('query', searchQuery);
+                }
+                
+                const accountId = accountFilterEl.value;
+                if (accountId) {
+                    params.append('accountId', accountId);
+                }
+                
+                const folder = folderFilterEl.value;
+                if (folder) {
+                    params.append('folder', folder);
+                }
+                
+                const category = document.querySelector('input[name="category"]:checked').value;
+                if (category) {
+                    params.append('category', category);
+                }
+                
+                // Make API call
+                const response = await fetch(`${API_EMAILS}?${params.toString()}`);
+                const data = await response.json();
+                
+                // Store emails and render the list
+                emails = data.results;
+                renderEmailList();
+            } catch (error) {
+                console.error('Error loading emails:', error);
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Render the email list
+        function renderEmailList() {
+            emailListEl.innerHTML = '';
+            
+            if (emails.length === 0) {
+                emailListEl.innerHTML = '<div class="p-3 text-center text-muted">No emails found</div>';
+                return;
+            }
+            
+            emails.forEach(email => {
+                const div = document.createElement('div');
+                div.className = `email-item ${email.id === currentEmailId ? 'active' : ''}`;
+                div.dataset.id = email.id;
+                
+                // Format date
+                const date = new Date(email.date);
+                const formattedDate = date.toLocaleDateString();
+                
+                // Get category badge color
+                const badgeClass = getCategoryBadgeClass(email.aiCategory);
+                
+                div.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <div class="fw-bold text-truncate">${email.from.split('<')[0].trim()}</div>
+                        <small>${formattedDate}</small>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="text-truncate">${email.subject}</div>
+                        <span class="badge ${badgeClass} category-badge">${email.aiCategory}</span>
+                    </div>
+                    <div class="email-preview mt-1">${email.body.substring(0, 100).replace(/\n/g, ' ')}...</div>
+                `;
+                
+                div.addEventListener('click', () => {
+                    currentEmailId = email.id;
+                    renderEmailList(); // Re-render to update active state
+                    renderEmailDetail(email);
+                });
+                
+                emailListEl.appendChild(div);
+            });
+        }
+        
+        // Render the email detail view
+        function renderEmailDetail(email) {
+            welcomeMessageEl.style.display = 'none';
+            
+            const date = new Date(email.date);
+            const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            
+            emailDetailEl.innerHTML = `
+                <div class="email-header">
+                    <div class="email-subject">${email.subject}</div>
+                    <div class="d-flex justify-content-between mb-2">
+                        <div>
+                            <div class="fw-bold">${email.from}</div>
+                            <div class="email-meta">To: ${email.to.join(', ')}</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="email-meta">${formattedDate}</div>
+                            <span class="badge ${getCategoryBadgeClass(email.aiCategory)}">${email.aiCategory}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="email-body">
+                    ${formatEmailBody(email.body)}
+                </div>
+                
+                <div class="mt-4">
+                    <button class="btn btn-primary" id="generate-reply-btn">Generate AI Reply</button>
+                </div>
+                
+                <div class="reply-box" id="reply-container" style="display: none;">
+                    <h5>AI Suggested Reply</h5>
+                    <div id="reply-content" class="mt-3"></div>
+                </div>
+            `;
+            
+            // Add event listener for generate reply button
+            document.getElementById('generate-reply-btn').addEventListener('click', () => {
+                generateSuggestedReply(email.id);
+            });
+        }
+        
+        // Generate suggested reply
+        async function generateSuggestedReply(emailId) {
+            showLoading();
+            
+            const replyContainerEl = document.getElementById('reply-container');
+            const replyContentEl = document.getElementById('reply-content');
+            
+            try {
+                const response = await fetch(`${API_EMAILS}/${emailId}/suggest-reply`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.reply) {
+                    replyContentEl.innerHTML = formatEmailBody(data.reply);
+                    replyContainerEl.style.display = 'block';
+                } else {
+                    throw new Error('No reply generated');
+                }
+            } catch (error) {
+                console.error('Error generating reply:', error);
+                replyContentEl.innerHTML = '<div class="alert alert-danger">Failed to generate reply. Please try again.</div>';
+                replyContainerEl.style.display = 'block';
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Helper function to get badge class based on category
+        function getCategoryBadgeClass(category) {
+            switch (category) {
+                case 'Interested':
+                    return 'bg-success';
+                case 'Meeting Booked':
+                    return 'bg-primary';
+                case 'Not Interested':
+                    return 'bg-danger';
+                case 'Spam':
+                    return 'bg-warning text-dark';
+                case 'Out of Office':
+                    return 'bg-info text-dark';
+                default:
+                    return 'bg-secondary';
+            }
+        }
+        
+        // Helper function to format email body
+        function formatEmailBody(body) {
+            if (!body) return '';
+            
+            // Convert URLs to links
+            const urlRegex = /(https?:\/\/[^\s]+)/g;
+            const withLinks = body.replace(urlRegex, '<a href="$1" target="_blank">$1</a>');
+            
+            // Convert line breaks to <br>
+            return withLinks.replace(/\n/g, '<br>');
+        }
+        
+        // Show loading indicator
+        function showLoading() {
+            loadingIndicatorEl.style.display = 'flex';
+        }
+        
+        // Hide loading indicator
+        function hideLoading() {
+            loadingIndicatorEl.style.display = 'none';
+        }
+        
+        // Debounce function to limit API calls
+        function debounce(func, delay) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => {
+                    func.apply(this, args);
+                }, delay);
+            };
+        }
+    </script>
+</body>
+</html>
