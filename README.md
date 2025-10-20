@@ -155,7 +155,3 @@ EXTERNAL_WEBHOOK_URL=your_webhook_site_url
 4. Mobile responsive UI improvements
 5. User authentication and multi-user support
 6. More AI-powered features like summarization and priority scoring
-
-## License
-
-ISC
